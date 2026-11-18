@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleExecutable</key><string>Tuna</string>
+    <key>CFBundleIdentifier</key><string>com.myrt.audio-calibration</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>Tuna</string>
+    <key>CFBundlePackageType</key><string>BNDL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.3</string>
+    <key>CFBundleVersion</key><string>4</string>
+    <key>AudioComponents</key>
+    <array>
+        <dict>
+            <key>name</key><string>myrt: Tuna</string>
+            <key>description</key><string>Stereo monitoring calibration and parametric EQ</string>
+            <key>type</key><string>aufx</string>
+            <key>subtype</key><string>ACal</string>
+            <key>manufacturer</key><string>Myrt</string>
+            <key>version</key><integer>259</integer>
+            <key>factoryFunction</key><string>CalibrationFactory</string>
+            <key>sandboxSafe</key><true/>
+        </dict>
+    </array>
+</dict>
+</plist>

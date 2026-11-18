@@ -1,0 +1,45 @@
+# Tuna
+
+A stereo AUv2 effect for macOS 14 and later. Tuna applies monitor correction from SoundID Reference and lets you add up to eight bands of parametric EQ to the left channel, the right channel, or both.
+
+## Build and installation
+
+You need Xcode and a Rust toolchain that supports your Mac's architecture. Run `make` to download the pinned version of Apple's AudioUnitSDK and build a signed component at `build/Tuna.component`.
+
+```sh
+make
+make install
+auval -v aufx ACal Myrt
+```
+
+`make install` builds and installs Tuna in your user Audio Units folder. When you update Tuna, the command replaces the previous component. Tuna uses the same AU identifier as Audio Calibration, so existing presets are compatible.
+
+In SoundID Reference, export your stereo monitor profile via **Export → RME**. In SoundSource, choose **System Output → Add Effect → myrt → Tuna**, open the editor, and click **Import Profile…**. The AU state includes the profile and your manual adjustments. **Time alignment** applies the per-channel delays from the file. **Safe headroom** lowers the overall level to compensate for frequency boosts.
+
+The **Target Curve** menu adds frequency shaping to both channels on top of the SoundID profile and manual EQ. The curve appears in the combined frequency response, is factored into **Safe headroom**, and is saved in the AU preset.
+
+- **Flat** preserves the original correction. This is the default for new and older presets.
+- **Harman** adds shelving filters of +6.6 dB at 105 Hz and −2.4 dB at 2.5 kHz, inspired by research on listener preferences for loudspeaker response. [Study by Olive, Welti, and McMullin](https://aes.org/publications/elibrary/elibrary-page/?id=17042)
+- **Marshall-style** emphasizes the upper midrange. This custom preset applies a −2 dB low shelf at 100 Hz and a +3 dB boost at 1.6 kHz.
+
+**Limit Calibration Range** restricts the imported profile's frequency correction, including its per-channel gain, to a selected range. For example, with a range of 200–5,000 Hz, the correction ramps up above 200 Hz and tapers off below 5,000 Hz. The transition spans up to half an octave at each end. Target Curve and manual EQ apply across the full frequency spectrum. Time alignment and Safe headroom continue to control channel delays and overall headroom. The range limits are saved in the AU preset.
+
+| Mode | Latency at 48 kHz |
+| --- | ---: |
+| Zero Latency | 0 ms |
+| Mixed | 15.33 ms |
+| Linear Phase | 80.33 ms |
+
+These values are for the filter. Time alignment, the output device, and SoundSource add their own latency.
+
+## Testing
+
+```sh
+make test
+make lint
+make test-au PROFILE="/path/to/asymmetric-stereo.tmreq"
+```
+
+`make test` runs the Rust tests. `make test-au` loads the installed Tuna component, measures the response and latency of all three modes at 44.1, 48, and 96 kHz, and checks that a new instance restores the saved state.
+
+`make lint` checks Rust formatting and runs Clippy. GitHub Actions runs the build, Rust tests, and lint checks on pushes and pull requests.
