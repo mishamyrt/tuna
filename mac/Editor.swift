@@ -507,78 +507,90 @@ private struct ResponsePlot: View {
             let plot = CGRect(x: 46, y: 12, width: max(1, proxy.size.width - 59),
                               height: max(1, proxy.size.height - 35))
             ZStack(alignment: .topLeading) {
-                Canvas { context, _ in
-                    for db in stride(from: -24.0, through: 24.0, by: 6.0) {
-                        let y = ordinate(db, in: plot)
-                        context.stroke(Path { line in
-                            line.move(to: CGPoint(x: plot.minX, y: y))
-                            line.addLine(to: CGPoint(x: plot.maxX, y: y))
-                        }, with: .color(.secondary.opacity(db == 0 ? 0.57 : 0.25)), lineWidth: 0.7)
-                        context.draw(Text("\(Int(db)) dB").font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary), at: CGPoint(x: plot.minX - 6, y: y), anchor: .trailing)
-                    }
-                    for (frequency, label) in [(20.0, "20"), (50, "50"), (100, "100"), (200, "200"),
-                                               (500, "500"), (1000, "1k"), (2000, "2k"), (5000, "5k"),
-                                               (10_000, "10k"), (20_000, "20k")] where frequency <= model.upperFrequency {
-                        let x = abscissa(frequency, in: plot)
-                        context.stroke(Path { line in
-                            line.move(to: CGPoint(x: x, y: plot.minY))
-                            line.addLine(to: CGPoint(x: x, y: plot.maxY))
-                        }, with: .color(.secondary.opacity(0.25)), lineWidth: 0.7)
-                        context.draw(Text(label).font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary), at: CGPoint(x: x, y: plot.maxY + 12))
-                    }
-                    var response = context
-                    response.clip(to: Path(plot))
-                    if let bandShape {
-                        let outline = path(bandShape, in: plot)
-                        var fill = outline
-                        fill.addLine(to: CGPoint(x: plot.maxX, y: plot.midY))
-                        fill.addLine(to: CGPoint(x: plot.minX, y: plot.midY))
-                        fill.closeSubpath()
-                        response.fill(fill, with: .color(.purple.opacity(0.20)))
-                        response.stroke(outline, with: .color(.purple), lineWidth: 1.25)
-                    }
-                    for curve in curves {
-                        response.stroke(path(curve.values, in: plot),
-                                        with: .color(curve.color.opacity(curve.reference ? 0.65 : 0.95)),
-                                        style: StrokeStyle(lineWidth: curve.reference ? 1 : 1.65,
-                                                           dash: curve.reference ? [3, 4] : []))
-                    }
-                }
-                .accessibilityHidden(true)
+                responseCanvas(curves: curves, bandShape: bandShape, in: plot)
                 ForEach(nodes, id: \.self) { index in
-                    let band = model.band(index)
-                    let color: Color = band.channels == 1 ? .cyan : band.channels == 2 ? .orange : .primary
-                    let selected = model.selection == index
-                    Button { model.selection = index } label: {
-                        Text("\(index + 1)")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .frame(width: 23, height: 23)
-                            .background(.regularMaterial, in: Circle())
-                            .overlay { Circle().strokeBorder(color.opacity(0.85), lineWidth: selected ? 2 : 1) }
-                            .foregroundStyle(color)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Band \(index + 1)")
-                    .position(x: abscissa(Double(band.frequency), in: plot),
-                              y: ordinate(Double(band.gain), in: plot))
-                    .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .named("response"))
-                        .onChanged { value in
-                            model.selection = index
-                            let x = min(1, max(0, (value.location.x - plot.minX) / plot.width))
-                            let y = min(1, max(0, (value.location.y - plot.minY) / plot.height))
-                            model.edit(index) {
-                                $0.frequency = Float((20 * pow(model.upperFrequency / 20, x)).rounded())
-                                $0.gain = Float(((1 - 2 * y) * gainLimit * 10).rounded() / 10)
-                            }
-                        })
+                    bandNode(index, in: plot)
                 }
             }
             .coordinateSpace(name: "response")
         }
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func responseCanvas(curves: [Curve], bandShape: [Float]?, in plot: CGRect) -> some View {
+        let frequencyTicks: [(Double, String)] = [
+            (20, "20"), (50, "50"), (100, "100"), (200, "200"), (500, "500"),
+            (1000, "1k"), (2000, "2k"), (5000, "5k"), (10_000, "10k"), (20_000, "20k")
+        ]
+        return Canvas { context, _ in
+            for db in stride(from: -24.0, through: 24.0, by: 6.0) {
+                let y = ordinate(db, in: plot)
+                context.stroke(Path { line in
+                    line.move(to: CGPoint(x: plot.minX, y: y))
+                    line.addLine(to: CGPoint(x: plot.maxX, y: y))
+                }, with: .color(.secondary.opacity(db == 0 ? 0.57 : 0.25)), lineWidth: 0.7)
+                context.draw(Text("\(Int(db)) dB").font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary), at: CGPoint(x: plot.minX - 6, y: y), anchor: .trailing)
+            }
+            for (frequency, label) in frequencyTicks where frequency <= model.upperFrequency {
+                let x = abscissa(frequency, in: plot)
+                context.stroke(Path { line in
+                    line.move(to: CGPoint(x: x, y: plot.minY))
+                    line.addLine(to: CGPoint(x: x, y: plot.maxY))
+                }, with: .color(.secondary.opacity(0.25)), lineWidth: 0.7)
+                context.draw(Text(label).font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary), at: CGPoint(x: x, y: plot.maxY + 12))
+            }
+            var response = context
+            response.clip(to: Path(plot))
+            if let bandShape {
+                let outline = path(bandShape, in: plot)
+                var fill = outline
+                fill.addLine(to: CGPoint(x: plot.maxX, y: plot.midY))
+                fill.addLine(to: CGPoint(x: plot.minX, y: plot.midY))
+                fill.closeSubpath()
+                response.fill(fill, with: .color(.purple.opacity(0.20)))
+                response.stroke(outline, with: .color(.purple), lineWidth: 1.25)
+            }
+            for curve in curves {
+                response.stroke(path(curve.values, in: plot),
+                                with: .color(curve.color.opacity(curve.reference ? 0.65 : 0.95)),
+                                style: StrokeStyle(lineWidth: curve.reference ? 1 : 1.65,
+                                                   dash: curve.reference ? [3, 4] : []))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func bandNode(_ index: Int, in plot: CGRect) -> some View {
+        let band = model.band(index)
+        let color: Color = band.channels == 1 ? .cyan : band.channels == 2 ? .orange : .primary
+        let selected = model.selection == index
+        return Button { model.selection = index } label: {
+            Text("\(index + 1)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .frame(width: 23, height: 23)
+                .background(.regularMaterial, in: Circle())
+                .overlay { Circle().strokeBorder(color.opacity(0.85), lineWidth: selected ? 2 : 1) }
+                .foregroundStyle(color)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Band \(index + 1)")
+        .position(x: abscissa(Double(band.frequency), in: plot),
+                  y: ordinate(Double(band.gain), in: plot))
+        .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .named("response"))
+            .onChanged { value in
+                model.selection = index
+                let x = min(1, max(0, Double((value.location.x - plot.minX) / plot.width)))
+                let y = min(1, max(0, Double((value.location.y - plot.minY) / plot.height)))
+                let frequency = 20 * pow(model.upperFrequency / 20, x)
+                let gain = (1 - 2 * y) * gainLimit
+                model.edit(index) {
+                    $0.frequency = Float(frequency.rounded())
+                    $0.gain = Float((gain * 10).rounded() / 10)
+                }
+            })
     }
 
     private func path(_ values: [Float], in plot: CGRect) -> Path {

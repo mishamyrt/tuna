@@ -4,7 +4,7 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>Tuna</string>
-    <key>CFBundleIdentifier</key><string>com.myrt.audio-calibration</string>
+    <key>CFBundleIdentifier</key><string>co.myrt.audio-calibration</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Tuna</string>
     <key>CFBundlePackageType</key><string>BNDL</string>
@@ -13,7 +13,7 @@
     <key>AudioComponents</key>
     <array>
         <dict>
-            <key>name</key><string>myrt: Tuna</string>
+            <key>name</key><string>Myrt: Tuna</string>
             <key>description</key><string>Stereo monitoring calibration and parametric EQ</string>
             <key>type</key><string>aufx</string>
             <key>subtype</key><string>ACal</string>

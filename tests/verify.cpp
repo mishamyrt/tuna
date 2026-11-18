@@ -400,14 +400,30 @@ int main(int argc, char** argv)
     expect(std::memcmp(&config, &restored, sizeof(config)) == 0, "the preset changed across restart");
     auto legacyState = CFDictionaryCreateMutableCopy(nullptr, 0, static_cast<CFDictionaryRef>(state));
     CFRelease(state);
-    const auto configKey = CFSTR("com.myrt.audio-calibration.config");
-    const auto targetKey = CFSTR("com.myrt.audio-calibration.target");
-    const auto rangeKey = CFSTR("com.myrt.audio-calibration.range");
-    const auto storedData = static_cast<CFDataRef>(CFDictionaryGetValue(legacyState, configKey));
-    expect(CFDataGetLength(storedData) == 812, "older components need the original v2 config payload");
-    CFDictionaryRemoveValue(legacyState, targetKey);
-    CFDictionaryRemoveValue(legacyState, rangeKey);
+    const auto legacyConfigKey = CFSTR("com.myrt.audio-calibration.config");
+    const auto legacyTargetKey = CFSTR("com.myrt.audio-calibration.target");
+    const auto legacyRangeKey = CFSTR("com.myrt.audio-calibration.range");
+    const auto renameKey = [legacyState](CFStringRef key, CFStringRef legacyKey) {
+        const auto value = CFDictionaryGetValue(legacyState, key);
+        expect(value, "preset should save a co.myrt key");
+        CFDictionarySetValue(legacyState, legacyKey, value);
+        CFDictionaryRemoveValue(legacyState, key);
+    };
+    renameKey(CFSTR("co.myrt.audio-calibration.config"), legacyConfigKey);
+    renameKey(CFSTR("co.myrt.audio-calibration.target"), legacyTargetKey);
+    renameKey(CFSTR("co.myrt.audio-calibration.range"), legacyRangeKey);
     CFPropertyListRef legacy = legacyState;
+    check(AudioComponentInstanceDispose(unit), "close AU after the preset round trip");
+    check(AudioComponentInstanceNew(component, &unit), "open fresh AU for the legacy preset");
+    check(AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &legacy, sizeof(legacy)),
+          "restore a preset saved under the previous bundle identifier");
+    check(AudioUnitGetProperty(unit, ACConfigProperty, kAudioUnitScope_Global, 0, &restored, &size), "get renamed preset");
+    expect(std::memcmp(&config, &restored, sizeof(config)) == 0, "legacy keys should restore all settings");
+
+    const auto storedData = static_cast<CFDataRef>(CFDictionaryGetValue(legacyState, legacyConfigKey));
+    expect(CFDataGetLength(storedData) == 812, "older components need the original v2 config payload");
+    CFDictionaryRemoveValue(legacyState, legacyTargetKey);
+    CFDictionaryRemoveValue(legacyState, legacyRangeKey);
     check(AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &legacy, sizeof(legacy)),
           "restore a v2 preset saved before Target Curve");
     check(AudioUnitGetProperty(unit, ACConfigProperty, kAudioUnitScope_Global, 0, &restored, &size), "get restored v2 state");
@@ -419,7 +435,7 @@ int main(int argc, char** argv)
     auto legacyConfig = config;
     legacyConfig.version = 1;
     auto legacyData = CFDataCreate(nullptr, reinterpret_cast<const UInt8*>(&legacyConfig), offsetof(ACConfig, wet));
-    CFDictionarySetValue(legacyState, configKey, legacyData);
+    CFDictionarySetValue(legacyState, legacyConfigKey, legacyData);
     CFRelease(legacyData);
     check(AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &legacy, sizeof(legacy)),
           "restore a preset saved before the mixer");

@@ -60,7 +60,7 @@ install: build
 		existing="$$destination/$$name"; \
 		if [[ -e "$$existing" || -L "$$existing" ]]; then \
 			identifier="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$$existing/Contents/Info.plist")"; \
-			if [[ "$$identifier" != "com.myrt.audio-calibration" ]]; then \
+			if [[ "$$identifier" != "co.myrt.audio-calibration" && "$$identifier" != "com.myrt.audio-calibration" ]]; then \
 				printf 'Another component already exists at %s\n' "$$existing" >&2; exit 1; \
 			fi; \
 		fi; \

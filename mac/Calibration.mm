@@ -15,9 +15,9 @@
 #include "DSP.h"
 
 namespace {
-const auto configKey = CFSTR("com.myrt.audio-calibration.config");
-const auto targetKey = CFSTR("com.myrt.audio-calibration.target");
-const auto rangeKey = CFSTR("com.myrt.audio-calibration.range");
+const auto configKey = CFSTR("co.myrt.audio-calibration.config");
+const auto targetKey = CFSTR("co.myrt.audio-calibration.target");
+const auto rangeKey = CFSTR("co.myrt.audio-calibration.range");
 constexpr ACConfig defaultConfig{.version = 2, .safe_headroom = 1, .wet = 1.0f};
 constexpr auto legacyConfigSize = offsetof(ACConfig, wet);
 constexpr auto storedConfigSize = offsetof(ACConfig, target);
@@ -47,7 +47,7 @@ class Calibration final : public ausdk::AUEffectBase {
 
 public:
     explicit Calibration(AudioComponentInstance unit)
-        : AUEffectBase(unit), worker_(dispatch_queue_create("com.myrt.audio-calibration.prepare", DISPATCH_QUEUE_SERIAL)),
+        : AUEffectBase(unit), worker_(dispatch_queue_create("co.myrt.audio-calibration.prepare", DISPATCH_QUEUE_SERIAL)),
           notifications_(std::make_shared<Notifications>()),
           notificationTimer_(dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                     dispatch_get_global_queue(QOS_CLASS_UTILITY, 0)))
@@ -323,7 +323,7 @@ public:
         if (result != noErr) {
             return result;
         }
-        // Keep the v2 config readable by older components.
+        // The v2 payload stores target and range separately.
         CFDataRef data = CFDataCreate(nullptr, reinterpret_cast<const UInt8*>(&config_), storedConfigSize);
         if (!data) {
             CFRelease(*out);
@@ -364,7 +364,11 @@ public:
             return kAudioUnitErr_InvalidPropertyValue;
         }
         const auto dict = static_cast<CFDictionaryRef>(state);
-        auto data = static_cast<CFDataRef>(CFDictionaryGetValue(dict, configKey));
+        const auto readValue = [dict](CFStringRef key, CFStringRef legacyKey) {
+            const auto value = CFDictionaryGetValue(dict, key);
+            return value ? value : CFDictionaryGetValue(dict, legacyKey);
+        };
+        const auto data = static_cast<CFDataRef>(readValue(configKey, CFSTR("com.myrt.audio-calibration.config")));
         ACConfig config = defaultConfig;
         if (data) {
             if (CFGetTypeID(data) != CFDataGetTypeID()) {
@@ -381,7 +385,7 @@ public:
                 return kAudioUnitErr_InvalidPropertyValue;
             }
         }
-        if (const auto number = static_cast<CFNumberRef>(CFDictionaryGetValue(dict, targetKey))) {
+        if (const auto number = static_cast<CFNumberRef>(readValue(targetKey, CFSTR("com.myrt.audio-calibration.target")))) {
             SInt32 target = 0;
             if (CFGetTypeID(number) != CFNumberGetTypeID()
                 || !CFNumberGetValue(number, kCFNumberSInt32Type, &target)) {
@@ -389,7 +393,7 @@ public:
             }
             config.target = static_cast<UInt32>(target);
         }
-        if (const auto range = static_cast<CFDataRef>(CFDictionaryGetValue(dict, rangeKey))) {
+        if (const auto range = static_cast<CFDataRef>(readValue(rangeKey, CFSTR("com.myrt.audio-calibration.range")))) {
             UInt32 bounds[3]{};
             if (CFGetTypeID(range) != CFDataGetTypeID() || CFDataGetLength(range) != sizeof(bounds)) {
                 return kAudioUnitErr_InvalidPropertyValue;
