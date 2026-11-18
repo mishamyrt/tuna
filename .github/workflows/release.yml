@@ -142,6 +142,10 @@ jobs:
             depends_on macos: :sonoma
 
             audio_unit_plugin "Tuna.component"
+
+            preflight_steps do
+              run "/usr/bin/xattr", args: ["-drs", "com.apple.quarantine", "{{staged_path}}/Tuna.component"]
+            end
           end
           EOF
           ruby -c "$cask"

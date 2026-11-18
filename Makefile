@@ -87,7 +87,7 @@ test-au: dsp
 	build/verify "$(PROFILE)"
 
 publish:
-    @sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' Cargo.toml > Cargo.toml.tmp
+	@sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' Cargo.toml > Cargo.toml.tmp
 	@mv Cargo.toml.tmp Cargo.toml
 	@cargo update -p tuna
 	@git add Makefile Cargo.toml Cargo.lock
