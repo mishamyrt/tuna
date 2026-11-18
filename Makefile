@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+VERSION := 0.1.0
 
 SDK := build/AudioUnitSDK
 SDK_REVISION := bd98b31feff57a15989fcfab4cd86dc63382b1ac
@@ -16,7 +17,7 @@ endif
 RUST_TARGET := $(RUST_ARCH)-apple-darwin
 export MACOSX_DEPLOYMENT_TARGET := 14.0
 
-.PHONY: all dsp build install test test-au lint
+.PHONY: all dsp build install test test-au lint publish
 all: build
 
 dsp:
@@ -84,3 +85,18 @@ test-au: dsp
 		"target/$(RUST_TARGET)/release/libtuna.a" \
 		-framework AudioToolbox -framework CoreFoundation -framework Accelerate -o build/verify
 	build/verify "$(PROFILE)"
+
+publish:
+    @sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' Cargo.toml > Cargo.toml.tmp
+	@mv Cargo.toml.tmp Cargo.toml
+	@cargo update -p tuna
+	@git add Makefile Cargo.toml Cargo.lock
+	@git commit -m "chore: release ${VERSION} 🔥"
+	@git tag "v${VERSION}"
+	@git-cliff -o CHANGELOG.md
+	@git tag -d "v${VERSION}"
+	@git add CHANGELOG.md
+	@git commit --amend --no-edit
+	@git tag -a "v${VERSION}" -m "release v${VERSION}"
+	@git push
+	@git push --tags
