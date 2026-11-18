@@ -4,6 +4,18 @@ A stereo AUv2 effect for macOS 14 and later. Tuna applies monitor correction fro
 
 ## Build and installation
 
+Install the published Audio Unit with Homebrew:
+
+```sh
+brew install --cask mishamyrt/tap/tuna
+```
+
+The release uses a self-signed certificate. macOS may require manual approval before a host can load the plug-in.
+
+If you installed Tuna or Audio Calibration manually, move the old component out of the Audio Units folder before switching to Homebrew.
+
+To build from source:
+
 You need Xcode and a Rust toolchain that supports your Mac's architecture. Run `make` to download the pinned version of Apple's AudioUnitSDK and build a signed component at `build/Tuna.component`.
 
 ```sh
@@ -14,7 +26,7 @@ auval -v aufx ACal Myrt
 
 `make install` builds and installs Tuna in your user Audio Units folder. When you update Tuna, the command replaces the previous component. Tuna uses the same AU identifier as Audio Calibration, so existing presets are compatible.
 
-In SoundID Reference, export your stereo monitor profile via **Export → RME**. In SoundSource, choose **System Output → Add Effect → myrt → Tuna**, open the editor, and click **Import Profile…**. The AU state includes the profile and your manual adjustments. **Time alignment** applies the per-channel delays from the file. **Safe headroom** lowers the overall level to compensate for frequency boosts.
+In SoundID Reference, export your stereo monitor profile via **Export → RME**. In SoundSource, choose **System Output → Add Effect → Myrt → Tuna**, open the editor, and click **Import Profile…**. The AU state includes the profile and your manual adjustments. **Time alignment** applies the per-channel delays from the file. **Safe headroom** lowers the overall level to compensate for frequency boosts.
 
 The **Target Curve** menu adds frequency shaping to both channels on top of the SoundID profile and manual EQ. The curve appears in the combined frequency response, is factored into **Safe headroom**, and is saved in the AU preset.
 
@@ -43,3 +55,9 @@ make test-au PROFILE="/path/to/asymmetric-stereo.tmreq"
 `make test` runs the Rust tests. `make test-au` loads the installed Tuna component, measures the response and latency of all three modes at 44.1, 48, and 96 kHz, and checks that a new instance restores the saved state.
 
 `make lint` checks Rust formatting and runs Clippy. GitHub Actions runs the build, Rust tests, and lint checks on pushes and pull requests.
+
+## Releasing
+
+Set the repository secrets `P12_CERTIFICATE_BASE64`, `P12_CERTIFICATE_PASSWORD`, and `P12_CERTIFICATE_NAME` with the base64-encoded signing identity, its PKCS#12 password, and the certificate name. Set `HOMEBREW_TAP_TOKEN` to a token with write access to the contents of `mishamyrt/homebrew-tap`.
+
+Pushing a version tag such as `v0.1.4` builds and signs a universal Audio Unit for Apple Silicon and Intel, publishes `Tuna.zip` on GitHub, and updates the Homebrew cask with the published archive's SHA-256 checksum.

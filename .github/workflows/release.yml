@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tuna-release
+  queue: max
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - name: Validate release version
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]]; then
+            echo '::error::Release tags must use the format v1.2.3.'
+            exit 1
+          fi
+          major=${BASH_REMATCH[1]}
+          minor=${BASH_REMATCH[2]}
+          patch=${BASH_REMATCH[3]}
+          if (( major > 65535 || minor > 255 || patch > 255 )); then
+            echo '::error::The version does not fit in the Audio Unit version field.'
+            exit 1
+          fi
+          echo "AU_VERSION=$(( (major << 16) | (minor << 8) | patch ))" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build universal Audio Unit
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-apple-darwin
+          make build BUILD_ARCH=x86_64
+          mv build/Tuna.component/Contents/MacOS/Tuna build/Tuna-x86_64
+          make build BUILD_ARCH=arm64
+          binary=build/Tuna.component/Contents/MacOS/Tuna
+          lipo -create build/Tuna-x86_64 "$binary" -output build/Tuna-universal
+          mv build/Tuna-universal "$binary"
+          architectures=" $(lipo -archs "$binary") "
+          [[ "$architectures" == *" arm64 "* && "$architectures" == *" x86_64 "* ]]
+
+          plist=build/Tuna.component/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#v}" "$plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $AU_VERSION" "$plist"
+          /usr/libexec/PlistBuddy -c "Set :AudioComponents:0:version $AU_VERSION" "$plist"
+
+      - name: Sign and archive Tuna
+        env:
+          P12_CERTIFICATE_BASE64: ${{ secrets.P12_CERTIFICATE_BASE64 }}
+          P12_CERTIFICATE_PASSWORD: ${{ secrets.P12_CERTIFICATE_PASSWORD }}
+          P12_CERTIFICATE_NAME: ${{ secrets.P12_CERTIFICATE_NAME }}
+        run: |
+          : "${P12_CERTIFICATE_BASE64:?Set the P12_CERTIFICATE_BASE64 repository secret}"
+          : "${P12_CERTIFICATE_PASSWORD:?Set the P12_CERTIFICATE_PASSWORD repository secret}"
+          : "${P12_CERTIFICATE_NAME:?Set the P12_CERTIFICATE_NAME repository secret}"
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/tuna-signing.XXXXXX")
+          keychain="$signing_dir/signing.keychain-db"
+          trap 'if [[ -f "$keychain" ]]; then security delete-keychain "$keychain" || true; fi; rm -rf "$signing_dir"' EXIT
+          password=$(openssl rand -hex 32)
+          printf '%s' "$P12_CERTIFICATE_BASE64" | base64 --decode > "$signing_dir/signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$signing_dir/signing.p12" -k "$keychain" -P "$P12_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security find-certificate -c "$P12_CERTIFICATE_NAME" -p "$keychain" > "$signing_dir/signing.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain" "$signing_dir/signing.pem"
+          codesign --force --sign "$P12_CERTIFICATE_NAME" --keychain "$keychain" --timestamp=none build/Tuna.component
+          codesign --verify --strict --all-architectures build/Tuna.component
+          ditto -c -k --keepParent build/Tuna.component "$RUNNER_TEMP/Tuna.zip"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if release=$(gh release view "$tag" --json isDraft,assets --jq \
+            '[.isDraft, any(.assets[]; .name == "Tuna.zip")] | @tsv'); then
+            # Keep published assets intact when rerunning after a tap update fails.
+            read -r draft has_asset <<< "$release"
+            if [[ "$has_asset" == false ]]; then
+              gh release upload "$tag" "$RUNNER_TEMP/Tuna.zip"
+            fi
+            if [[ "$draft" == true ]]; then
+              gh release edit "$tag" --draft=false
+            fi
+          else
+            gh release create "$tag" "$RUNNER_TEMP/Tuna.zip" --verify-tag --title "Tuna ${tag#v}" --generate-notes
+          fi
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: mishamyrt/homebrew-tap
+          ref: main
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew cask
+        working-directory: homebrew-tap
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cask=Casks/tuna.rb
+          if [[ -f "$cask" ]] && ruby -rrubygems/version -e '
+            current = File.read(ARGV[0])[/^  version "([^"]+)"/, 1]
+            exit(current && Gem::Version.new(current) > Gem::Version.new(ARGV[1]))
+          ' "$cask" "$version"; then
+            echo 'The tap already has a newer version.'
+            exit 0
+          fi
+
+          homepage="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          url="$homepage/releases/download/$GITHUB_REF_NAME/Tuna.zip"
+          download="$RUNNER_TEMP/published-Tuna.zip"
+          curl --fail --location --silent --show-error --retry 4 --retry-all-errors "$url" --output "$download"
+          sha256=$(shasum -a 256 "$download")
+          mkdir -p Casks
+          cat > "$cask" <<EOF
+          cask "tuna" do
+            version "$version"
+            sha256 "${sha256%% *}"
+
+            url "$url"
+            name "Tuna"
+            desc "Stereo monitoring calibration and parametric EQ"
+            homepage "$homepage"
+
+            depends_on macos: :sonoma
+
+            audio_unit_plugin "Tuna.component"
+          end
+          EOF
+          ruby -c "$cask"
+          git add "$cask"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "tuna $version"
+          git pull --rebase
+          git push
