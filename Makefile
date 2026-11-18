@@ -5,6 +5,7 @@ SDK := build/AudioUnitSDK
 SDK_REVISION := bd98b31feff57a15989fcfab4cd86dc63382b1ac
 COMPONENT := build/Tuna.component
 COMPONENTS_DIR ?= $(HOME)/Library/Audio/Plug-Ins/Components
+COMPONENT_NAMES := "Tuna.component" "Audio Calibration.component"
 
 BUILD_ARCH := $(shell uname -m)
 ifeq ($(BUILD_ARCH),arm64)
@@ -17,7 +18,7 @@ endif
 RUST_TARGET := $(RUST_ARCH)-apple-darwin
 export MACOSX_DEPLOYMENT_TARGET := 14.0
 
-.PHONY: all dsp build install test test-au lint publish
+.PHONY: all dsp build install uninstall test test-au lint publish
 all: build
 
 dsp:
@@ -49,6 +50,18 @@ build: dsp
 		-o "$(COMPONENT)/Contents/MacOS/Tuna"
 	codesign --force --sign - "$(COMPONENT)"
 
+define check-installed-components
+for name in $(COMPONENT_NAMES); do \
+	component="$$destination/$$name"; \
+	if [[ -e "$$component" || -L "$$component" ]]; then \
+		identifier="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$$component/Contents/Info.plist")"; \
+		if [[ "$$identifier" != "co.myrt.audio-calibration" && "$$identifier" != "com.myrt.audio-calibration" ]]; then \
+			printf 'Another component already exists at %s\n' "$$component" >&2; exit 1; \
+		fi; \
+	fi; \
+done
+endef
+
 install: build
 	@set -eu; \
 	destination="$(COMPONENTS_DIR)"; \
@@ -57,19 +70,23 @@ install: build
 	trap 'rm -rf "$$stage"' EXIT; \
 	ditto "$(COMPONENT)" "$$stage/Tuna.component"; \
 	codesign --verify --strict "$$stage/Tuna.component"; \
-	for name in "Tuna.component" "Audio Calibration.component"; do \
-		existing="$$destination/$$name"; \
-		if [[ -e "$$existing" || -L "$$existing" ]]; then \
-			identifier="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$$existing/Contents/Info.plist")"; \
-			if [[ "$$identifier" != "co.myrt.audio-calibration" && "$$identifier" != "com.myrt.audio-calibration" ]]; then \
-				printf 'Another component already exists at %s\n' "$$existing" >&2; exit 1; \
-			fi; \
-		fi; \
-	done; \
+	$(check-installed-components); \
 	rm -rf "$$destination/Tuna.component"; \
 	mv "$$stage/Tuna.component" "$$destination/Tuna.component"; \
 	rm -rf "$$destination/Audio Calibration.component"; \
 	printf 'Installed: %s\n' "$$destination/Tuna.component"
+
+uninstall:
+	@set -eu; \
+	destination="$(COMPONENTS_DIR)"; \
+	$(check-installed-components); \
+	for name in $(COMPONENT_NAMES); do \
+		component="$$destination/$$name"; \
+		if [[ -e "$$component" || -L "$$component" ]]; then \
+			rm -rf -- "$$component"; \
+			printf 'Uninstalled: %s\n' "$$component"; \
+		fi; \
+	done
 
 test:
 	cargo test --locked

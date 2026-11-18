@@ -12,7 +12,7 @@ brew install --cask mishamyrt/tap/tuna
 
 The release uses a self-signed certificate. macOS may require manual approval before a host can load the plug-in.
 
-If you installed Tuna or Audio Calibration manually, move the old component out of the Audio Units folder before switching to Homebrew.
+If you installed Tuna or Audio Calibration manually, run `make uninstall` before switching to Homebrew.
 
 To build from source:
 
