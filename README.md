@@ -1,4 +1,17 @@
-# Tuna
+<p align="center">
+    <img src="./assets/logo.svg" height="80px" />
+</p>
+
+<h1 align="center">Tuna</h1>
+
+<p align="center">
+  <a href="https://github.com/mishamyrt/tuna/actions/workflows/quality-assurance.yml">
+    <img src="https://github.com/mishamyrt/tuna/actions/workflows/quality-assurance.yml/badge.svg" />
+  </a>
+  <a href="https://github.com/mishamyrt/tuna/releases/latest">
+    <img src="https://img.shields.io/github/v/tag/mishamyrt/tuna?label=version"
+  </a>
+</p>
 
 A stereo AUv2 effect for macOS 14 and later. Tuna applies monitor correction from SoundID Reference and lets you add up to eight bands of parametric EQ to the left channel, the right channel, or both.
 
