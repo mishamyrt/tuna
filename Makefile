@@ -71,8 +71,12 @@ install: build
 	ditto "$(COMPONENT)" "$$stage/Tuna.component"; \
 	codesign --verify --strict "$$stage/Tuna.component"; \
 	$(check-installed-components); \
-	rm -rf "$$destination/Tuna.component"; \
-	mv "$$stage/Tuna.component" "$$destination/Tuna.component"; \
+	if [[ -e "$$destination/Tuna.component" || -L "$$destination/Tuna.component" ]]; then \
+		xcrun swift -e 'import Darwin; if renamex_np(CommandLine.arguments[1], CommandLine.arguments[2], UInt32(RENAME_SWAP)) != 0 { perror("swap Tuna.component"); exit(1) }' \
+			"$$stage/Tuna.component" "$$destination/Tuna.component"; \
+	else \
+		mv "$$stage/Tuna.component" "$$destination/Tuna.component"; \
+	fi; \
 	rm -rf "$$destination/Audio Calibration.component"; \
 	printf 'Installed: %s\n' "$$destination/Tuna.component"
 
