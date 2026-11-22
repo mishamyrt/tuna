@@ -1,5 +1,6 @@
 SHELL := /bin/bash
-VERSION := 0.1.1
+PACKAGE_VERSION := $(shell sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml)
+VERSION ?= $(PACKAGE_VERSION)
 
 SDK := build/AudioUnitSDK
 SDK_REVISION := bd98b31feff57a15989fcfab4cd86dc63382b1ac
@@ -36,7 +37,16 @@ build: dsp
 		-module-name TunaUI -parse-as-library -import-objc-header mac/EditorBridge.h \
 		-emit-object mac/Editor.swift -o build/Editor.o
 	mkdir -p "$(COMPONENT)/Contents/MacOS" "$(COMPONENT)/Contents/Resources"
-	cp mac/Info.plist "$(COMPONENT)/Contents/Info.plist"
+	@set -eu; \
+	version="$(PACKAGE_VERSION)"; \
+	[[ "$$version" =~ ^(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$$ ]] && \
+		(( BASH_REMATCH[1] <= 65535 && BASH_REMATCH[2] <= 255 && BASH_REMATCH[3] <= 255 )) || \
+		{ echo "Unsupported Audio Unit version: $$version" >&2; exit 1; }; \
+	packed=$$(( (BASH_REMATCH[1] << 16) | (BASH_REMATCH[2] << 8) | BASH_REMATCH[3] )); \
+	cp mac/Info.plist "$(COMPONENT)/Contents/Info.plist"; \
+	/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $$version" \
+		-c "Add :CFBundleVersion string $$packed" -c "Add :AudioComponents:0:version integer $$packed" \
+		"$(COMPONENT)/Contents/Info.plist"
 	cp "$(SDK)/LICENSE.txt" "$(COMPONENT)/Contents/Resources/AudioUnitSDK-LICENSE.txt"
 	@set -e; \
 	swift_compiler="$$(xcrun --find swiftc)"; \

@@ -22,21 +22,6 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
-      - name: Validate release version
-        run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]]; then
-            echo '::error::Release tags must use the format v1.2.3.'
-            exit 1
-          fi
-          major=${BASH_REMATCH[1]}
-          minor=${BASH_REMATCH[2]}
-          patch=${BASH_REMATCH[3]}
-          if (( major > 65535 || minor > 255 || patch > 255 )); then
-            echo '::error::The version does not fit in the Audio Unit version field.'
-            exit 1
-          fi
-          echo "AU_VERSION=$(( (major << 16) | (minor << 8) | patch ))" >> "$GITHUB_ENV"
-
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -54,9 +39,8 @@ jobs:
           [[ "$architectures" == *" arm64 "* && "$architectures" == *" x86_64 "* ]]
 
           plist=build/Tuna.component/Contents/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#v}" "$plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $AU_VERSION" "$plist"
-          /usr/libexec/PlistBuddy -c "Set :AudioComponents:0:version $AU_VERSION" "$plist"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+          [[ "$GITHUB_REF_NAME" == "v$version" ]] || { echo "::error::Tag must match Cargo version $version"; exit 1; }
 
       - name: Sign and archive Tuna
         env:
