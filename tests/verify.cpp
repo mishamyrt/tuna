@@ -129,7 +129,9 @@ void verify(AudioUnit unit, const ACConfig& profile, double rate, UInt32 mode)
                 sum += double(sample) * phasor;
                 phasor *= advance;
             }
-            maxError = std::max(maxError, std::abs(20 * std::log10(std::abs(sum)) - target[index]));
+            const double error = std::abs(20 * std::log10(std::abs(sum)) - target[index]);
+            expect(std::isfinite(error), "non-finite frequency response");
+            maxError = std::max(maxError, error);
         }
     }
     if (config.wet == 0) {
