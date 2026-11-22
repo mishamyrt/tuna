@@ -257,11 +257,16 @@ impl Convolver {
         let partitions = self.filters.len();
         for (index, filter) in self.filters.iter().enumerate() {
             let history = &self.history[(self.cursor + partitions - index) % partitions];
+            // Bound each slice once so the complex products can be vectorized.
+            let xr = &history.real[..=BLOCK];
+            let xi = &history.imag[..=BLOCK];
+            let hr = &filter.real[..=BLOCK];
+            let hi = &filter.imag[..=BLOCK];
+            let real = &mut self.work.real[..=BLOCK];
+            let imag = &mut self.work.imag[..=BLOCK];
             for bin in 0..=BLOCK {
-                let (xr, xi) = (history.real[bin], history.imag[bin]);
-                let (hr, hi) = (filter.real[bin], filter.imag[bin]);
-                self.work.real[bin] += xr * hr - xi * hi;
-                self.work.imag[bin] += xr * hi + xi * hr;
+                real[bin] += xr[bin] * hr[bin] - xi[bin] * hi[bin];
+                imag[bin] += xr[bin] * hi[bin] + xi[bin] * hr[bin];
             }
         }
         for bin in 1..BLOCK {
