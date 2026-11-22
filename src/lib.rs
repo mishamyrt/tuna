@@ -194,55 +194,21 @@ pub extern "C" fn ac_headroom(config: &Config, rate: f64) -> f32 {
     if !rate_supported(rate) || config.safe_headroom == 0 {
         return 0.0;
     }
-    let mut peak: f64 = 1.0;
-    for channel in 0..2 {
-        let limited = LimitedProfile::new(config, channel, rate);
-        let bands = config.bands(channel, limited.is_none(), true);
-        let filters: Vec<_> = bands.map(|band| Biquad::new(band, rate)).collect();
-        let trim = if limited.is_some() {
-            0.0
-        } else {
-            config.profile[channel].trim
-        };
-        let mut channel_peak = 1.0;
-        if !filters.is_empty() || limited.is_some() {
-            let nyquist = rate * 0.5;
-            let ratio = nyquist.powf(1.0 / 1023.0);
-            let resonances = filters
-                .iter()
-                .chain(limited.iter().flat_map(|profile| &profile.filters))
-                .flat_map(|filter| {
-                    let (radius, angle) = filter.dominant_pole();
-                    (-32..=32).map(move |step| {
-                        let omega = angle + step as f64 * (1.0 - radius) / 8.0;
-                        (omega * rate / TAU).clamp(0.0, nyquist)
-                    })
-                });
-            channel_peak = [0.0, nyquist]
-                .into_iter()
-                .chain((0..1023).map(|i| ratio.powi(i)))
-                .chain(resonances)
-                .chain(limited.iter().flat_map(|profile| {
-                    let step = (profile.high / profile.low).powf(1.0 / 16.0);
-                    (0..=16)
-                        .map(move |i| profile.low * step.powi(i))
-                        .filter(move |f| *f < nyquist)
-                }))
-                .map(|frequency| {
-                    magnitude(&filters, frequency, rate)
-                        * limited
-                            .as_ref()
-                            .map_or(1.0, |profile| profile.magnitude(frequency, rate))
-                })
-                .fold(0.0, f64::max);
-        }
-        peak = peak.max(db_to_amp(trim) as f64 * channel_peak);
+    design_channels(config, rate)
+        .and_then(|designs| headroom(&designs, rate))
+        .unwrap_or(0.0)
+}
+
+fn headroom(designs: &[ChannelDesign; 2], rate: f64) -> Option<f32> {
+    let mut peak = 1.0_f64;
+    for design in designs {
+        peak = peak.max(design.peak_gain(rate)?);
     }
-    if peak > 1.0001 {
+    Some(if peak > 1.0001 {
         -1.0 - 20.0 * peak.log10() as f32
     } else {
         0.0
-    }
+    })
 }
 
 /// # Safety
@@ -425,6 +391,55 @@ struct ChannelDesign {
     trim: f32,
 }
 
+impl ChannelDesign {
+    fn peak_gain(&self, rate: f64) -> Option<f64> {
+        let gains = fir::cascade_magnitudes([self.linear.as_deref(), self.causal.as_deref()])?;
+        let trim = f64::from(db_to_amp(self.trim));
+        if self.iir.is_empty() {
+            return Some(trim * gains.into_iter().reduce(f64::max).unwrap_or(1.0));
+        }
+        let nyquist = rate * 0.5;
+        let mut peak = 0.0_f64;
+        let mut measure = |frequency, fir_gain| {
+            peak = peak.max(magnitude(&self.iir, frequency, rate) * fir_gain);
+        };
+        if gains.is_empty() {
+            let ratio = nyquist.powf(1.0 / 1023.0);
+            measure(0.0, 1.0);
+            for i in 0..=1023 {
+                measure(ratio.powi(i), 1.0);
+            }
+        } else {
+            for (bin, &gain) in gains.iter().enumerate() {
+                measure(nyquist * bin as f64 / (gains.len() - 1) as f64, gain);
+            }
+        }
+        // A narrow IIR resonance can fall between even oversampled FFT bins.
+        for filter in &self.iir {
+            let (radius, angle) = filter.dominant_pole();
+            for step in -32..=32 {
+                let omega = angle + f64::from(step) * (1.0 - radius) / 8.0;
+                let frequency = (omega * rate / TAU).clamp(0.0, nyquist);
+                let gain = if gains.is_empty() {
+                    1.0
+                } else {
+                    let bin = frequency / nyquist * (gains.len() - 1) as f64;
+                    gains[bin.floor() as usize].max(gains[bin.ceil() as usize])
+                };
+                measure(frequency, gain);
+            }
+        }
+        Some(trim * peak)
+    }
+}
+
+fn design_channels(config: &Config, rate: f64) -> Option<[ChannelDesign; 2]> {
+    Some([
+        design_channel(config, 0, false, rate)?,
+        design_channel(config, 1, false, rate)?,
+    ])
+}
+
 fn design_channel(
     config: &Config,
     channel: usize,
@@ -478,9 +493,25 @@ fn design_channel(
 }
 
 impl Channel {
+    #[cfg(test)]
     fn new(config: &Config, rate: f64, channel: usize, headroom: f32) -> Option<Self> {
+        Self::from_design(
+            design_channel(config, channel, false, rate)?,
+            config,
+            rate,
+            channel,
+            headroom,
+        )
+    }
+
+    fn from_design(
+        design: ChannelDesign,
+        config: &Config,
+        rate: f64,
+        channel: usize,
+        headroom: f32,
+    ) -> Option<Self> {
         let latency = ac_latency(config.mode, rate);
-        let design = design_channel(config, channel, false, rate)?;
         let fir = match design.linear {
             Some(taps) => Some(Convolver::new(&taps)?),
             None => None,
@@ -566,19 +597,30 @@ pub extern "C" fn ac_begin_transition(active: &Processor, incoming: &mut Process
     }
 }
 
+impl Processor {
+    fn new(config: &Config, rate: f64) -> Option<Self> {
+        if !config.valid() || !rate_supported(rate) {
+            return None;
+        }
+        let designs = design_channels(config, rate)?;
+        let gain = if config.safe_headroom != 0 {
+            headroom(&designs, rate)?
+        } else {
+            0.0
+        };
+        let [left, right] = designs;
+        Some(Self([
+            Channel::from_design(left, config, rate, 0, gain)?,
+            Channel::from_design(right, config, rate, 1, gain)?,
+        ]))
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn ac_create(config: &Config, rate: f64) -> *mut Processor {
-    if !config.valid() || !rate_supported(rate) {
-        return std::ptr::null_mut();
-    }
-    let headroom = ac_headroom(config, rate);
-    match (
-        Channel::new(config, rate, 0, headroom),
-        Channel::new(config, rate, 1, headroom),
-    ) {
-        (Some(left), Some(right)) => Box::into_raw(Box::new(Processor([left, right]))),
-        _ => std::ptr::null_mut(),
-    }
+    Processor::new(config, rate).map_or(std::ptr::null_mut(), |processor| {
+        Box::into_raw(Box::new(processor))
+    })
 }
 
 /// # Safety
@@ -792,6 +834,38 @@ mod tests {
         }
         config.range_low = 5_000;
         assert!(!config.valid());
+    }
+
+    #[test]
+    fn mixed_headroom_covers_the_rendered_filter_pair() {
+        let rate = 48_000.0;
+        let mut config: Config = unsafe { std::mem::zeroed() };
+        config.version = 2;
+        config.mode = 1;
+        config.safe_headroom = 1;
+        config.wet = 1.0;
+        let boost = Band {
+            frequency: 500.0,
+            gain: 24.0,
+            q: 3.34,
+            kind: 0,
+            channels: 3,
+        };
+        config.user[0] = boost;
+        config.user[1] = Band {
+            gain: -24.0,
+            q: 3.33,
+            ..boost
+        };
+        let mut processor = Processor::new(&config, rate).unwrap();
+        let peak = (0..48_000)
+            .map(|frame| {
+                let input = (TAU * 500.0 * f64::from(frame) / rate).sin() as f32;
+                processor.0[0].process(input, 1.0).abs()
+            })
+            .skip(24_000)
+            .fold(0.0_f32, f32::max);
+        assert!((0.85..=0.90).contains(&peak), "rendered peak: {peak}");
     }
 
     #[test]

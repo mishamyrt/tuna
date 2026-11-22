@@ -100,6 +100,27 @@ pub fn design(half_length: usize, rate: f64, response: impl Fn(f64) -> f64) -> O
     Some(taps)
 }
 
+/// Sample the magnitude of the complete FIR cascade, including the design windows.
+pub fn cascade_magnitudes(stages: [Option<&[f32]>; 2]) -> Option<Vec<f64>> {
+    let length: usize = stages.iter().flatten().map(|taps| taps.len()).sum();
+    if length == 0 {
+        return Some(Vec::new());
+    }
+    let size = (8 * length).next_power_of_two();
+    let fft = Fft::new(size)?;
+    let mut spectrum = Spectrum::new(size);
+    let mut gains = vec![1.0; size / 2 + 1];
+    for taps in stages.into_iter().flatten() {
+        spectrum.clear();
+        spectrum.real[..taps.len()].copy_from_slice(taps);
+        fft.transform(&mut spectrum, false);
+        for (bin, gain) in gains.iter_mut().enumerate() {
+            *gain *= f64::from(spectrum.real[bin]).hypot(f64::from(spectrum.imag[bin]));
+        }
+    }
+    Some(gains)
+}
+
 pub fn centered_response(taps: &[f32], cos: [f64; 4]) -> [f64; 4] {
     let center = taps.len() / 2;
     let (current, previous) = cosine_series(&taps[center + 1..], cos);
