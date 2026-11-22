@@ -39,6 +39,7 @@ void check(OSStatus status, const char* what)
 struct Source {
     double rate;
     bool signal = false;
+    double leftOmega = 0.051;
 
     static OSStatus pull(void* ref, AudioUnitRenderActionFlags*, const AudioTimeStamp* timestamp,
                          UInt32, UInt32 count, AudioBufferList* output)
@@ -49,7 +50,7 @@ struct Source {
             for (UInt32 i = 0; i < count; ++i) {
                 const double frame = timestamp->mSampleTime + i;
                 data[i] = source.signal
-                    ? 0.2f * std::sin(frame * (channel == 0 ? 0.051 : 0.078))
+                    ? 0.2f * std::sin(frame * (channel == 0 ? source.leftOmega : 0.078))
                     : frame == 0.0 ? 1.0f : 0.0f;
             }
         }
@@ -312,6 +313,43 @@ void verifyLiveChanges(AudioUnit unit)
                                &tail, &size), "read narrow-band tail");
     expect(tail > 2.0 && tail == ac_tail_time(&config, rate), "AU did not report the narrow-band tail");
     check(AudioUnitUninitialize(unit), "uninitialize narrow-band tail AU");
+
+    // A right-only edit must preserve the ringing left EQ, even when global headroom changes.
+    config = {.version = 2, .safe_headroom = 1, .wet = 1};
+    config.user[0] = {40, 6, 4, 0, 1};
+    source.leftOmega = 2 * std::numbers::pi * 40 / rate;
+    setConfig();
+    check(AudioUnitInitialize(unit), "initialize stereo EQ test");
+    timestamp.mSampleTime = 0;
+    for (unsigned block = 0; block < 1000; ++block) {
+        render();
+    }
+    double oldHeadroom = ac_headroom(&config, rate);
+    for (float rightGain : {-3.0f, 12.0f}) {
+        config.user[1] = {float(0.078 * rate / (2 * std::numbers::pi)), rightGain, 1, 0, 2};
+        setConfig();
+        double headroom = ac_headroom(&config, rate);
+        const auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        bool settled = false;
+        while (!settled && std::chrono::steady_clock::now() < timeout) {
+            render();
+            settled = true;
+            for (unsigned i = 0; i < frames; ++i) {
+                double frame = timestamp.mSampleTime - frames + i;
+                double tone = 0.2 * std::sin(frame * source.leftOmega);
+                double before = tone * std::pow(10.0, (6 + oldHeadroom) / 20);
+                double after = tone * std::pow(10.0, (6 + headroom) / 20);
+                expect(left[i] >= std::min(before, after) - 1e-6 && left[i] <= std::max(before, after) + 1e-6,
+                       "right EQ edit disturbed the left filter state");
+                double rightTarget = 0.2 * std::sin(frame * 0.078) * std::pow(10.0, (rightGain + headroom) / 20);
+                settled &= std::abs(left[i] - after) < 1e-6 && std::abs(right[i] - rightTarget) < 1e-6;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        expect(settled, "stereo EQ did not settle at the new gain and headroom");
+        oldHeadroom = headroom;
+    }
+    check(AudioUnitUninitialize(unit), "uninitialize stereo EQ test");
 }
 }
 

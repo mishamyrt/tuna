@@ -166,6 +166,7 @@ public:
         if (!incoming_) {
             incoming_ = pending_.exchange(nullptr, std::memory_order_acq_rel);
             if (incoming_) {
+                ac_begin_transition(active_->processor, incoming_->processor);
                 position_ = 0;
                 warmFrames_ = std::max<size_t>(fadeFrames_ * 2,
                                                incoming_->latency * 2 + incoming_->alignmentFrames

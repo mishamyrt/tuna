@@ -552,6 +552,21 @@ impl Channel {
 pub struct Processor([Channel; 2]);
 
 #[unsafe(no_mangle)]
+pub extern "C" fn ac_begin_transition(active: &Processor, incoming: &mut Processor) {
+    for (old, new) in active.0.iter().zip(&mut incoming.0) {
+        new.wet_mix = old.wet_mix;
+        // IIR is first in the signal path. After the first changed section,
+        // downstream sections no longer have the same input history.
+        for (from, to) in old.iir.iter().zip(&mut new.iir) {
+            if from.a != to.a || from.b != to.b {
+                break;
+            }
+            to.state = from.state;
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn ac_create(config: &Config, rate: f64) -> *mut Processor {
     if !config.valid() || !rate_supported(rate) {
         return std::ptr::null_mut();

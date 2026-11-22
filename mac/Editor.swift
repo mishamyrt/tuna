@@ -8,9 +8,13 @@ final class CalibrationViewFactory: NSObject, AUCocoaUIBase {
     func interfaceVersion() -> UInt32 { 0 }
 
     func uiView(forAudioUnit audioUnit: AudioUnit, with size: NSSize) -> NSView? {
-        let view = NSHostingView(rootView: Editor(model: EditorModel(unit: audioUnit)))
-        view.frame = NSRect(x: 0, y: 0, width: 690, height: 468)
-        return view
+        let makeView = { @MainActor in
+            let view = NSHostingView(rootView: Editor(model: EditorModel(unit: audioUnit)))
+            view.frame = NSRect(x: 0, y: 0, width: 690, height: 468)
+            return view
+        }
+        if Thread.isMainThread { return MainActor.assumeIsolated { makeView() } }
+        return DispatchQueue.main.sync { makeView() }
     }
 }
 
@@ -23,12 +27,59 @@ private struct Curve {
     let reference: Bool
 }
 
+private struct CurvePlot {
+    var curves: [Curve] = []
+    var bandShape: [Float]?
+    var headroom: Float = 0
+
+    static func calculate(config: ACConfig, rate: Double, selection: Int?) -> CurvePlot {
+        var config = config
+        func response(_ config: ACConfig, channel: Int, profileOnly: Bool = false,
+                      offset: Float = 0) -> [Float] {
+            var config = config
+            var points = [Float](repeating: 0, count: graphPoints)
+            points.withUnsafeMutableBufferPointer { values in
+                ac_curve(&config, rate, UInt32(channel), profileOnly, offset, values.baseAddress, values.count)
+            }
+            return points
+        }
+
+        let selected = selection.flatMap { index in
+            let band = ac_user_band(&config, index)
+            return band.channels == 0 ? nil : (index, band)
+        }
+        var referenceConfig = config
+        if let (index, _) = selected {
+            ac_set_user_band(&referenceConfig, index, ACBand())
+        }
+        let colors: [Color] = [.cyan, .orange]
+        let attenuation = ac_headroom(&config, rate)
+        let curves = [true, false].flatMap { reference in
+            (0..<2).map { channel in
+                let profileOnly = reference && selected == nil
+                let source = reference ? referenceConfig : config
+                let points = response(source, channel: channel, profileOnly: profileOnly,
+                                      offset: profileOnly ? 0 : attenuation)
+                return Curve(values: points, color: colors[channel], reference: reference)
+            }
+        }
+        let bandShape = selected.map { _, band in
+            var solo = ACConfig()
+            solo.wet = 1
+            var band = band
+            band.channels = 1
+            ac_set_user_band(&solo, 0, band)
+            return response(solo, channel: 0)
+        }
+        return CurvePlot(curves: curves, bandShape: bandShape, headroom: attenuation)
+    }
+}
+
+@MainActor
 private final class EditorModel: ObservableObject {
     @Published private(set) var config = ACConfig()
-    @Published private(set) var curves: [Curve] = []
-    @Published private(set) var bandShape: [Float]?
+    @Published private(set) var plot = CurvePlot()
     @Published private(set) var rate = 44_100.0
-    @Published private(set) var headroom: Float = 0
     @Published private(set) var clipping = false
     @Published var error: String?
     @Published var selection: Int? {
@@ -39,6 +90,8 @@ private final class EditorModel: ObservableObject {
     @Published var editChannels: UInt32 = 3
 
     private let unit: AudioUnit
+    private var calculatingCurves = false
+    private var needsCurveUpdate = false
     private var lastClip = Date.distantPast
 
     init(unit: AudioUnit) {
@@ -163,45 +216,24 @@ private final class EditorModel: ObservableObject {
     }
 
     private func updateCurves() {
-        var config = config
-        let selected = selection.flatMap { index in
-            let band = self.band(index)
-            return band.channels == 0 ? nil : (index, band)
+        if calculatingCurves {
+            needsCurveUpdate = true
+            return
         }
-        var referenceConfig = config
-        if let (index, _) = selected {
-            ac_set_user_band(&referenceConfig, index, ACBand())
-        }
-        let colors: [Color] = [.cyan, .orange]
-        let attenuation = ac_headroom(&config, rate)
-        curves = [true, false].flatMap { reference in
-            (0..<2).map { channel in
-                let profileOnly = reference && selected == nil
-                let source = reference ? referenceConfig : config
-                let points = response(source, channel: channel, profileOnly: profileOnly,
-                                      offset: profileOnly ? 0 : attenuation)
-                return Curve(values: points, color: colors[channel], reference: reference)
+        calculatingCurves = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, config, rate, selection] in
+            let result = CurvePlot.calculate(config: config, rate: rate, selection: selection)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.calculatingCurves = false
+                if self.needsCurveUpdate {
+                    self.needsCurveUpdate = false
+                    self.updateCurves()
+                } else {
+                    self.plot = result
+                }
             }
         }
-        bandShape = selected.map { _, band in
-            var solo = ACConfig()
-            solo.wet = 1
-            var band = band
-            band.channels = 1
-            ac_set_user_band(&solo, 0, band)
-            return response(solo, channel: 0)
-        }
-        headroom = attenuation
-    }
-
-    private func response(_ config: ACConfig, channel: Int, profileOnly: Bool = false,
-                          offset: Float = 0) -> [Float] {
-        var config = config
-        var points = [Float](repeating: 0, count: graphPoints)
-        points.withUnsafeMutableBufferPointer { values in
-            ac_curve(&config, rate, UInt32(channel), profileOnly, offset, values.baseAddress, values.count)
-        }
-        return points
     }
 }
 
@@ -254,7 +286,7 @@ private struct Editor: View {
                 Spacer()
                 Text("Left").foregroundStyle(.cyan)
                 Text("Right").foregroundStyle(.orange)
-                if model.bandShape != nil {
+                if model.plot.bandShape != nil {
                     Text("Band shape").foregroundStyle(.purple)
                     Text("Dashed: without band").foregroundStyle(.secondary)
                 } else {
@@ -312,7 +344,7 @@ private struct Editor: View {
                     get: { model.config.safe_headroom != 0 },
                     set: { enabled in model.change { $0.safe_headroom = enabled ? 1 : 0 } }
                 ))
-                Text(String(format: "%.1f dB", model.headroom))
+                Text(String(format: "%.1f dB", model.plot.headroom))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -501,8 +533,8 @@ private struct ResponsePlot: View {
     private let gainLimit = 24.0
 
     var body: some View {
-        let curves = model.curves
-        let bandShape = model.bandShape
+        let curves = model.plot.curves
+        let bandShape = model.plot.bandShape
         GeometryReader { proxy in
             let plot = CGRect(x: 46, y: 12, width: max(1, proxy.size.width - 59),
                               height: max(1, proxy.size.height - 35))

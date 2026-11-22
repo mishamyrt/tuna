@@ -54,6 +54,7 @@ float ac_headroom(const ACConfig *config, double rate);
 void ac_curve(const ACConfig *config, double rate, uint32_t channel, bool profile_only, float wet_gain_db,
               float *points, size_t count);
 ACProcessor *ac_create(const ACConfig *config, double rate);
+void ac_begin_transition(const ACProcessor *active, ACProcessor *incoming);
 void ac_destroy(ACProcessor *processor);
 void ac_reset(ACProcessor *processor);
 float ac_process(ACProcessor *processor, size_t channel, const float *input, size_t input_stride,
