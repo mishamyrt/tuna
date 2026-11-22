@@ -230,12 +230,11 @@ private final class EditorModel: ObservableObject {
             let result = CurvePlot.calculate(config: config, rate: rate, selection: selection)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.plot = result
                 self.calculatingCurves = false
                 if self.needsCurveUpdate {
                     self.needsCurveUpdate = false
                     self.updateCurves()
-                } else {
-                    self.plot = result
                 }
             }
         }
