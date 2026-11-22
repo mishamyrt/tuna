@@ -272,12 +272,11 @@ pub unsafe extern "C" fn ac_curve(
         return;
     };
     let delay = if profile_only {
-        0.0
+        0
     } else {
         alignment_delay(config, rate, channel)
     };
     let gain = db_to_amp(design.trim + wet_gain_db) as f64;
-    let fraction = delay.fract();
     for (chunk, points) in points.chunks_mut(4).enumerate() {
         let omega: [f64; 4] =
             std::array::from_fn(|i| TAU * graph_frequency(chunk * 4 + i, count, rate) / rate);
@@ -291,26 +290,20 @@ pub unsafe extern "C" fn ac_curve(
             .map_or([(1.0, 0.0); 4], |taps| fir::causal_response(taps, trig));
         for (i, point) in points.iter_mut().enumerate() {
             let (sin, cos) = trig[i];
-            let (delay_real, delay_imag) = (1.0 - fraction + fraction * cos, -fraction * sin);
             let iir_gain = design
                 .iir
                 .iter()
                 .map(|filter| filter.magnitude(sin, cos))
                 .product::<f64>();
             let (range_real, range_imag) = causal[i];
-            let amplitude = gain
-                * iir_gain
-                * linear[i]
-                * range_real.hypot(range_imag)
-                * delay_real.hypot(delay_imag);
+            let amplitude = gain * iir_gain * linear[i] * range_real.hypot(range_imag);
             let blended = if wet == 1.0 {
                 amplitude.abs()
             } else {
                 // The FIR's common latency is also on the dry path.
                 let phase = design.iir.iter().map(|f| f.phase(sin, cos)).sum::<f64>()
                     + range_imag.atan2(range_real)
-                    + delay_imag.atan2(delay_real)
-                    - omega[i] * delay.floor();
+                    - omega[i] * delay as f64;
                 let (sin, cos) = phase.sin_cos();
                 (1.0 - wet + wet * amplitude * cos).hypot(wet * amplitude * sin)
             };
@@ -322,20 +315,13 @@ pub unsafe extern "C" fn ac_curve(
 struct Delay {
     buffer: Vec<f32>,
     cursor: usize,
-    samples: usize,
-    fraction: f32,
 }
 
 impl Delay {
-    fn new(delay: f64) -> Self {
-        let samples = delay.floor() as usize;
-        let fraction = delay.fract() as f32;
-        let length = if delay == 0.0 { 0 } else { samples + 2 };
+    fn new(samples: usize) -> Self {
         Self {
-            buffer: vec![0.0; length],
+            buffer: vec![0.0; samples],
             cursor: 0,
-            samples,
-            fraction,
         }
     }
 
@@ -344,14 +330,9 @@ impl Delay {
         if self.buffer.is_empty() {
             return sample;
         }
-        self.buffer[self.cursor] = sample;
-        let length = self.buffer.len();
-        let recent = (self.cursor + length - self.samples) % length;
-        let older = if recent == 0 { length - 1 } else { recent - 1 };
-        let output =
-            self.buffer[recent] + self.fraction * (self.buffer[older] - self.buffer[recent]);
+        let output = std::mem::replace(&mut self.buffer[self.cursor], sample);
         self.cursor += 1;
-        if self.cursor == length {
+        if self.cursor == self.buffer.len() {
             self.cursor = 0;
         }
         output
@@ -379,19 +360,17 @@ fn uses_iir(mode: u32, band: &Band) -> bool {
     mode == 0 || (mode == 1 && (band.frequency < 500.0 || band.frequency / band.q < 150.0))
 }
 
-fn alignment_delay(config: &Config, rate: f64, channel: usize) -> f64 {
+fn alignment_delay(config: &Config, rate: f64, channel: usize) -> usize {
     if config.alignment == 0 {
-        0.0
+        0
     } else {
-        config.profile[channel].delay_ms as f64 * rate / 1000.0
+        (f64::from(config.profile[channel].delay_ms) * rate / 1000.0).round() as usize
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ac_alignment_frames(config: &Config, rate: f64) -> usize {
-    alignment_delay(config, rate, 0)
-        .max(alignment_delay(config, rate, 1))
-        .ceil() as usize
+    alignment_delay(config, rate, 0).max(alignment_delay(config, rate, 1))
 }
 
 #[unsafe(no_mangle)]
@@ -415,7 +394,7 @@ pub extern "C" fn ac_tail_time(config: &Config, rate: f64) -> f64 {
     let mut longest: f64 = 0.0;
     for channel in 0..2 {
         let mut frames =
-            ac_latency(config.mode, rate) as f64 + alignment_delay(config, rate, channel).ceil();
+            (ac_latency(config.mode, rate) + alignment_delay(config, rate, channel)) as f64;
         let limited = config.range_enabled != 0 && has_profile_correction(config, channel);
         let mut has_fir = limited && config.mode == 2;
         if limited && config.mode < 2 {
@@ -510,13 +489,13 @@ impl Channel {
             Some(taps) => Some(CausalConvolver::new(&taps)?),
             None => None,
         };
-        let flat_wet_delay = Delay::new(if fir.is_some() { 0.0 } else { latency as f64 });
+        let flat_wet_delay = Delay::new(if fir.is_some() { 0 } else { latency });
         let delay = alignment_delay(config, rate, channel);
         Some(Self {
             iir: design.iir,
             fir,
             range,
-            dry_delay: Delay::new(latency as f64),
+            dry_delay: Delay::new(latency),
             flat_wet_delay,
             alignment: Delay::new(delay),
             gain: db_to_amp(design.trim + headroom),
@@ -633,6 +612,61 @@ pub unsafe extern "C" fn ac_process(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alignment_preserves_impulses_and_matches_the_wet_mix_curve() {
+        let mut config: Config = unsafe { std::mem::zeroed() };
+        config.version = 2;
+        config.alignment = 1;
+        config.profile[0].delay_ms = 1.01;
+        config.profile[1].delay_ms = 0.49;
+        for (rate, expected_frames) in [(48_000.0, [48, 24]), (44_100.0, [45, 22])] {
+            for (channel, delay) in expected_frames.into_iter().enumerate() {
+                for wet in [1.0, 0.25] {
+                    config.wet = wet;
+                    let mut dsp = Channel::new(&config, rate, channel, 0.0).unwrap();
+                    for frame in 0..=2 * delay {
+                        let sample = dsp.process(if frame == 0 { 1.0 } else { 0.0 }, wet);
+                        let expected = if frame == 0 {
+                            1.0 - wet
+                        } else if frame == delay {
+                            wet
+                        } else {
+                            0.0
+                        };
+                        assert_eq!(
+                            sample, expected,
+                            "{rate} Hz, channel {channel}, frame {frame}"
+                        );
+                    }
+                    let mut curve = [0.0; 32];
+                    unsafe {
+                        ac_curve(
+                            &config,
+                            rate,
+                            channel as u32,
+                            false,
+                            0.0,
+                            curve.as_mut_ptr(),
+                            curve.len(),
+                        )
+                    };
+                    for (i, db) in curve.iter().enumerate() {
+                        let phase =
+                            TAU * graph_frequency(i, curve.len(), rate) * delay as f64 / rate;
+                        let mix = f64::from(wet);
+                        let amplitude = (1.0 - mix + mix * phase.cos()).hypot(mix * phase.sin());
+                        assert!((f64::from(*db) - 20.0 * amplitude.log10()).abs() < 1e-5);
+                    }
+                }
+            }
+            assert_eq!(ac_alignment_frames(&config, rate), expected_frames[0]);
+            assert_eq!(
+                ac_tail_time(&config, rate),
+                expected_frames[0] as f64 / rate
+            );
+        }
+    }
 
     #[test]
     fn targets_shape_both_channels_and_leave_profile_reference_flat() {

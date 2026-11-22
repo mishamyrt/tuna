@@ -39,7 +39,7 @@ auval -v aufx ACal Myrt
 
 `make install` builds and installs Tuna in your user Audio Units folder. When you update Tuna, the command replaces the previous component. Tuna uses the same AU identifier as Audio Calibration, so existing presets are compatible.
 
-In SoundID Reference, export your stereo monitor profile via **Export → RME**. In SoundSource, choose **System Output → Add Effect → Myrt → Tuna**, open the editor, and click **Import Profile…**. The AU state includes the profile and your manual adjustments. **Time alignment** applies the per-channel delays from the file. **Safe headroom** lowers the overall level to compensate for frequency boosts.
+In SoundID Reference, export your stereo monitor profile via **Export → RME**. In SoundSource, choose **System Output → Add Effect → Myrt → Tuna**, open the editor, and click **Import Profile…**. The AU state includes the profile and your manual adjustments. **Time alignment** rounds each channel’s exported delay to the nearest sample at the current sample rate. This preserves the channel’s frequency response at 100% wet, with a timing error of at most half a sample (10.4 µs at 48 kHz). **Safe headroom** lowers the overall level to compensate for frequency boosts.
 
 The **Target Curve** menu adds frequency shaping to both channels on top of the SoundID profile and manual EQ. The curve appears in the combined frequency response, is factored into **Safe headroom**, and is saved in the AU preset.
 
