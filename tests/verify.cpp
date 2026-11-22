@@ -353,6 +353,21 @@ void verifyLiveChanges(AudioUnit unit)
         oldHeadroom = headroom;
     }
     check(AudioUnitUninitialize(unit), "uninitialize stereo EQ test");
+
+    UInt32 bypass = 1;
+    check(AudioUnitSetProperty(unit, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global, 0,
+                               &bypass, sizeof(bypass)), "bypass before initialization");
+    check(AudioUnitInitialize(unit), "initialize bypassed AU");
+    timestamp.mSampleTime = 0;
+    render();
+    for (unsigned i = 0; i < frames; ++i) {
+        expect(std::abs(right[i] - 0.2f * std::sin(i * 0.078)) < 1e-6,
+               "pre-bypassed AU must start dry");
+    }
+    check(AudioUnitUninitialize(unit), "uninitialize bypassed AU");
+    bypass = 0;
+    check(AudioUnitSetProperty(unit, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global, 0,
+                               &bypass, sizeof(bypass)), "clear bypass");
 }
 }
 

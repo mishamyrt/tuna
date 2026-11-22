@@ -102,7 +102,11 @@ public:
         if (rate != GetInput0().GetStreamFormat().mSampleRate) {
             return kAudioUnitErr_FormatNotSupported;
         }
-        active_ = prepare(config_, rate);
+        auto initial = config_;
+        if (bypass_.load(std::memory_order_relaxed)) {
+            initial.wet = 0.0f;
+        }
+        active_ = prepare(initial, rate);
         if (!active_) {
             return memFullErr;
         }
