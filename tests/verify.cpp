@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstring>
 #include <fstream>
+#include <dlfcn.h>
 #include <iostream>
 #include <numbers>
 #include <string>
@@ -355,7 +356,7 @@ void verifyLiveChanges(AudioUnit unit)
 
 int main(int argc, char** argv)
 {
-    expect(argc == 2, "usage: verify path-to-stereo.tmreq");
+    expect(argc == 3, "usage: verify path-to-stereo.tmreq path-to-component-binary");
     std::ifstream file(argv[1], std::ios::binary);
     expect(file.good(), "read profile file");
     const std::string data{std::istreambuf_iterator<char>(file), {}};
@@ -373,8 +374,12 @@ int main(int argc, char** argv)
     expect(std::strcmp(config.name, "Test profile") == 0, "failed import should preserve the profile");
 
     const AudioComponentDescription description{kAudioUnitType_Effect, 'ACal', 'Myrt', 0, 0};
-    const auto component = AudioComponentFindNext(nullptr, &description);
-    expect(component, "AU is missing from the Core Audio registry");
+    const auto bundle = dlopen(argv[2], RTLD_NOW | RTLD_LOCAL);
+    expect(bundle, "load the built Tuna binary");
+    const auto factory = reinterpret_cast<AudioComponentFactoryFunction>(dlsym(bundle, "CalibrationFactory"));
+    expect(factory, "load the Tuna factory");
+    const auto component = AudioComponentRegister(&description, CFSTR("Myrt: Tuna"), 0, factory);
+    expect(component, "register built component for verification");
     AudioUnit unit = nullptr;
     check(AudioComponentInstanceNew(component, &unit), "open AU");
     AudioUnitCocoaViewInfo view{};

@@ -62,10 +62,10 @@ These values are for the filter. Time alignment, the output device, and SoundSou
 ```sh
 make test
 make lint
-make test-au PROFILE="/path/to/asymmetric-stereo.tmreq"
+make test-au
 ```
 
-`make test` runs the Rust tests. `make test-au` loads the installed Tuna component, measures the response and latency of all three modes at 44.1, 48, and 96 kHz, and checks that a new instance restores the saved state.
+`make test` runs the Rust tests. `make test-au` builds Tuna and loads that binary directly, measures the response and latency of all three modes at 44.1, 48, and 96 kHz, and checks that a new instance restores the saved state. It uses a synthetic stereo profile by default. Pass `PROFILE=/path/to/asymmetric-stereo.tmreq` to check another export.
 
 `make lint` checks Rust formatting and runs Clippy. GitHub Actions runs the build, Rust tests, and lint checks on pushes and pull requests.
 

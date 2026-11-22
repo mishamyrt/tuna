@@ -95,13 +95,14 @@ lint:
 	cargo fmt --all -- --check
 	cargo clippy --locked --all-targets -- -D warnings
 
-test-au: dsp
+PROFILE ?= tests/asymmetric.tmreq
+test-au: build
 	@test -f "$(PROFILE)" || { echo 'Usage: make test-au PROFILE=/path/to/asymmetric-stereo.tmreq' >&2; exit 1; }
 	mkdir -p build
 	xcrun clang++ -std=c++23 -O3 -arch "$(BUILD_ARCH)" tests/verify.cpp \
 		"target/$(RUST_TARGET)/release/libtuna.a" \
 		-framework AudioToolbox -framework CoreFoundation -framework Accelerate -o build/verify
-	build/verify "$(PROFILE)"
+	build/verify "$(PROFILE)" "$(COMPONENT)/Contents/MacOS/Tuna"
 
 publish:
 	@sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' Cargo.toml > Cargo.toml.tmp
