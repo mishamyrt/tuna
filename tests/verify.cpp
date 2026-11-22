@@ -446,6 +446,16 @@ int main(int argc, char** argv)
     config.range_enabled = 1;
     check(AudioUnitSetProperty(unit, ACConfigProperty, kAudioUnitScope_Global, 0, &config, sizeof(config)),
           "set state for round trip");
+    ACConfigEdit edit{config, config};
+    edit.updated.wet = 0.5f;
+    check(AudioUnitSetProperty(unit, ACConfigEditProperty, kAudioUnitScope_Global, 0, &edit, sizeof(edit)),
+          "apply editor change");
+    check(AudioUnitSetProperty(unit, ACConfigProperty, kAudioUnitScope_Global, 0, &config, sizeof(config)),
+          "replace settings from host");
+    edit.original = edit.updated;
+    edit.updated.target = ACTargetFlat;
+    expect(AudioUnitSetProperty(unit, ACConfigEditProperty, kAudioUnitScope_Global, 0, &edit, sizeof(edit))
+           == ACConfigChanged, "stale editor change must preserve host settings");
     CFPropertyListRef state = nullptr;
     size = sizeof(state);
     check(AudioUnitGetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &state, &size),

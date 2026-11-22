@@ -12,6 +12,7 @@ extern "C" {
 enum {
     ACProfileBands = 9, ACUserBands = 8, ACNameBytes = 256,
     ACConfigProperty = 0x41430001, ACStatusProperty = 0x41430002,
+    ACConfigEditProperty = 0x41430003, ACConfigChanged = -70001,
     ACTargetFlat = 0, ACTargetHarman = 1, ACTargetMarshall = 2
 };
 
@@ -34,6 +35,10 @@ typedef struct {
     uint32_t target;
     uint32_t range_low, range_high, range_enabled;
 } ACConfig;
+
+typedef struct {
+    ACConfig original, updated;
+} ACConfigEdit;
 
 typedef struct {
     double sample_rate;

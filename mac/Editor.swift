@@ -204,13 +204,18 @@ private final class EditorModel: ObservableObject {
     }
 
     private func send(_ candidate: ACConfig) {
-        var candidate = candidate
-        let result = AudioUnitSetProperty(unit, UInt32(ACConfigProperty), kAudioUnitScope_Global, 0,
-                                          &candidate, UInt32(MemoryLayout<ACConfig>.size))
+        var edit = ACConfigEdit(original: config, updated: candidate)
+        let result = AudioUnitSetProperty(unit, UInt32(ACConfigEditProperty), kAudioUnitScope_Global, 0,
+                                          &edit, UInt32(MemoryLayout<ACConfigEdit>.size))
         if result == noErr {
             config = candidate
             updateCurves()
         } else {
+            if result == ACConfigChanged {
+                refresh()
+                error = "The host changed the settings. Apply your edit again."
+                return
+            }
             error = "The audio effect couldn’t apply the settings (\(result))."
         }
     }

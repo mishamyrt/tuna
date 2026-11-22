@@ -244,6 +244,10 @@ public:
                 size = sizeof(ACConfig);
                 writable = true;
                 return noErr;
+            case ACConfigEditProperty:
+                size = sizeof(ACConfigEdit);
+                writable = true;
+                return noErr;
             case ACStatusProperty:
                 size = sizeof(ACStatus);
                 writable = false;
@@ -297,6 +301,21 @@ public:
                          const void* data, UInt32 size) override
     {
         if (scope == kAudioUnitScope_Global && element == 0) {
+            if (property == ACConfigEditProperty) {
+                if (size != sizeof(ACConfigEdit)) {
+                    return kAudioUnitErr_InvalidPropertyValue;
+                }
+                ACConfigEdit edit;
+                std::memcpy(&edit, data, sizeof(edit));
+                if (std::memcmp(&config_, &edit.original, sizeof(config_)) != 0) {
+                    return ACConfigChanged;
+                }
+                const auto result = SetProperty(ACConfigProperty, scope, element, &edit.updated, sizeof(edit.updated));
+                if (result == noErr) {
+                    PropertyChanged(ACConfigProperty, scope, element);
+                }
+                return result;
+            }
             if (property == ACConfigProperty) {
                 if (size != sizeof(ACConfig)) {
                     return kAudioUnitErr_InvalidPropertyValue;
