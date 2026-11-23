@@ -40,7 +40,7 @@ jobs:
 
           plist=build/Tuna.component/Contents/Info.plist
           version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
-          [[ "$GITHUB_REF_NAME" == "v$version" ]] || { echo "::error::Tag must match Cargo version $version"; exit 1; }
+          [[ "$GITHUB_REF_NAME" == "v$version" ]] || { echo "::error::Tag must match component version $version"; exit 1; }
 
       - name: Sign and archive Tuna
         env:

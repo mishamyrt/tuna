@@ -1,9 +1,8 @@
 SHELL := /bin/bash
+VERSION := 0.1.1
 CORE := Sources/TunaCore
 CORE_MANIFEST := $(CORE)/Cargo.toml
 EDITOR := Sources/Tuna/Editor
-PACKAGE_VERSION := $(shell sed -nE 's/^version = "([^"]+)"/\1/p' $(CORE_MANIFEST))
-VERSION ?= $(PACKAGE_VERSION)
 
 SDK := build/AudioUnitSDK
 SDK_REVISION := bd98b31feff57a15989fcfab4cd86dc63382b1ac
@@ -41,7 +40,7 @@ build: dsp
 		-I Sources/Tuna -I $(CORE)/include -whole-module-optimization -emit-object $(EDITOR)/*.swift -o build/Editor.o
 	mkdir -p "$(COMPONENT)/Contents/MacOS" "$(COMPONENT)/Contents/Resources"
 	@set -eu; \
-	version="$(PACKAGE_VERSION)"; \
+	version="$(VERSION)"; \
 	[[ "$$version" =~ ^(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$$ ]] && \
 		(( BASH_REMATCH[1] <= 65535 && BASH_REMATCH[2] <= 255 && BASH_REMATCH[3] <= 255 )) || \
 		{ echo "Unsupported Audio Unit version: $$version" >&2; exit 1; }; \
@@ -125,6 +124,10 @@ publish:
 	@sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' $(CORE_MANIFEST) > $(CORE_MANIFEST).tmp
 	@mv $(CORE_MANIFEST).tmp $(CORE_MANIFEST)
 	@cargo update --manifest-path "$(CORE_MANIFEST)" -p tuna
+ifeq ($(origin VERSION),command line)
+	@sed -E 's/^VERSION := .*/VERSION := $(VERSION)/' Makefile > Makefile.tmp
+	@mv Makefile.tmp Makefile
+endif
 	@git add Makefile $(CORE_MANIFEST) $(CORE)/Cargo.lock
 	@git commit -m "chore: release ${VERSION} 🔥"
 	@git tag "v${VERSION}"
