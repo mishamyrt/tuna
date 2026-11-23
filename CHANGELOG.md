@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2](https://github.com/mishamyrt/tuna/compare/v0.1.1..v0.1.2) - 2026-11-23
+
+### 🐛 Bug Fixes
+
+- Avoid tone shift
+- Avoid channel mixing
+- Start bypassed playback fully dry
+- Preserve host presets during editor changes
+- Refresh the response graph during drags
+- Replace installed bundles atomically
+- Measure headroom from the rendered filters
+
+### 🚜 Refactor
+
+- Split sources
+
+### 📚 Documentation
+
+- Add logo
+- Simplify readme
+- Add colors to logo
+- Add badges
+
+### ⚡ Performance
+
+- Vectorize filter partition mixing
+
 ## [0.1.0](https://github.com/mishamyrt/tuna/compare/..v0.1.0) - 2026-11-18
 
 ### 🚜 Refactor
