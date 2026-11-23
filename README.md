@@ -1,8 +1,17 @@
 <p align="center">
-    <img src="./Assets/logo.svg" height="80px" />
+    <img src="./Assets/logo.svg" width="80px" />
 </p>
 
 <h1 align="center">Tuna</h1>
+
+<p align="center">
+  <a href="https://github.com/mishamyrt/tuna/actions/workflows/quality-assurance.yml">
+      <img src="https://github.com/mishamyrt/tuna/actions/workflows/quality-assurance.yml/badge.svg" />
+  </a>
+  <a href="https://github.com/mishamyrt/tuna/releases/latest">
+    <img src="https://img.shields.io/github/v/tag/mishamyrt/tuna?label=version"
+  </a>
+</p>
 
 Tuna is a stereo Audio Unit (AUv2) for macOS 14 or later. It applies a SoundID Reference monitor profile and lets you adjust the sound with parametric EQ.
 
