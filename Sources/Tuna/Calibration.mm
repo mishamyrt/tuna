@@ -12,7 +12,7 @@
 #include <mutex>
 #include <vector>
 
-#include "DSP.h"
+#include "Properties.h"
 
 namespace {
 const auto configKey = CFSTR("co.myrt.audio-calibration.config");

@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-#include "../mac/DSP.h"
+#include "Properties.h"
 
 namespace {
 constexpr unsigned frames = 128;

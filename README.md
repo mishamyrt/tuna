@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="./assets/logo.svg" height="80px" />
+    <img src="./Assets/logo.svg" height="80px" />
 </p>
 
 <h1 align="center">Tuna</h1>
@@ -73,4 +73,4 @@ make test-au
 
 Set the repository secrets `P12_CERTIFICATE_BASE64`, `P12_CERTIFICATE_PASSWORD`, and `P12_CERTIFICATE_NAME` with the base64-encoded signing identity, its PKCS#12 password, and the certificate name. Set `HOMEBREW_TAP_TOKEN` to a token with write access to the contents of `mishamyrt/homebrew-tap`.
 
-Pushing a version tag matching `Cargo.toml`, such as `v0.1.4`, builds and signs a universal Audio Unit for Apple Silicon and Intel, publishes `Tuna.zip` on GitHub, and updates the Homebrew cask with the published archive's SHA-256 checksum.
+Pushing a version tag matching `Sources/TunaCore/Cargo.toml`, such as `v0.1.4`, builds and signs a universal Audio Unit for Apple Silicon and Intel, publishes `Tuna.zip` on GitHub, and updates the Homebrew cask with the published archive's SHA-256 checksum.

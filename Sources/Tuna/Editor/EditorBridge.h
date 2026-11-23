@@ -1,2 +1,2 @@
 #import <AudioToolbox/AUCocoaUIView.h>
-#import "DSP.h"
+#import "Properties.h"

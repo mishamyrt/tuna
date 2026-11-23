@@ -1,5 +1,8 @@
 SHELL := /bin/bash
-PACKAGE_VERSION := $(shell sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml)
+CORE := Sources/TunaCore
+CORE_MANIFEST := $(CORE)/Cargo.toml
+EDITOR := Sources/Tuna/Editor
+PACKAGE_VERSION := $(shell sed -nE 's/^version = "([^"]+)"/\1/p' $(CORE_MANIFEST))
 VERSION ?= $(PACKAGE_VERSION)
 
 SDK := build/AudioUnitSDK
@@ -23,7 +26,7 @@ export MACOSX_DEPLOYMENT_TARGET := 14.0
 all: build
 
 dsp:
-	cargo build --release --locked --target "$(RUST_TARGET)"
+	cargo build --manifest-path "$(CORE_MANIFEST)" --release --locked --target "$(RUST_TARGET)"
 
 build: dsp
 	@mkdir -p build
@@ -34,8 +37,8 @@ build: dsp
 	@test "$$(git -C "$(SDK)" rev-parse HEAD)" = "$(SDK_REVISION)" || \
 		{ echo "Unexpected AudioUnitSDK revision in $(SDK)" >&2; exit 1; }
 	xcrun swiftc -swift-version 5 -target "$(BUILD_ARCH)-apple-macosx$(MACOSX_DEPLOYMENT_TARGET)" -O \
-		-module-name TunaUI -parse-as-library -import-objc-header mac/EditorBridge.h \
-		-emit-object mac/Editor.swift -o build/Editor.o
+		-module-name TunaUI -parse-as-library -import-objc-header $(EDITOR)/EditorBridge.h \
+		-I Sources/Tuna -I $(CORE)/include -whole-module-optimization -emit-object $(EDITOR)/*.swift -o build/Editor.o
 	mkdir -p "$(COMPONENT)/Contents/MacOS" "$(COMPONENT)/Contents/Resources"
 	@set -eu; \
 	version="$(PACKAGE_VERSION)"; \
@@ -43,7 +46,7 @@ build: dsp
 		(( BASH_REMATCH[1] <= 65535 && BASH_REMATCH[2] <= 255 && BASH_REMATCH[3] <= 255 )) || \
 		{ echo "Unsupported Audio Unit version: $$version" >&2; exit 1; }; \
 	packed=$$(( (BASH_REMATCH[1] << 16) | (BASH_REMATCH[2] << 8) | BASH_REMATCH[3] )); \
-	cp mac/Info.plist "$(COMPONENT)/Contents/Info.plist"; \
+	cp Assets/Info.plist "$(COMPONENT)/Contents/Info.plist"; \
 	/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $$version" \
 		-c "Add :CFBundleVersion string $$packed" -c "Add :AudioComponents:0:version integer $$packed" \
 		"$(COMPONENT)/Contents/Info.plist"
@@ -52,8 +55,8 @@ build: dsp
 	swift_compiler="$$(xcrun --find swiftc)"; \
 	swift_libraries="$$(dirname "$$swift_compiler")/../lib/swift/macosx"; \
 	xcrun clang++ -bundle -std=c++23 -O3 -DNDEBUG -fobjc-arc -fvisibility=hidden -arch "$(BUILD_ARCH)" \
-		-I "$(SDK)/include" mac/Calibration.mm "$(SDK)"/src/AudioUnitSDK/*.cpp build/Editor.o \
-		"target/$(RUST_TARGET)/release/libtuna.a" \
+		-I "$(SDK)/include" -I $(CORE)/include Sources/Tuna/Calibration.mm "$(SDK)"/src/AudioUnitSDK/*.cpp build/Editor.o \
+		"$(CORE)/target/$(RUST_TARGET)/release/libtuna.a" \
 		-framework AudioToolbox -framework CoreAudio -framework CoreMIDI -framework CoreFoundation \
 		-framework AppKit -framework SwiftUI -framework Accelerate -framework UniformTypeIdentifiers \
 		-L "$$swift_libraries" -Wl,-rpath,/usr/lib/swift -lswiftCore \
@@ -103,26 +106,26 @@ uninstall:
 	done
 
 test:
-	cargo test --locked
+	cargo test --manifest-path "$(CORE_MANIFEST)" --locked
 
 lint:
-	cargo fmt --all -- --check
-	cargo clippy --locked --all-targets -- -D warnings
+	cargo fmt --manifest-path "$(CORE_MANIFEST)" --all -- --check
+	cargo clippy --manifest-path "$(CORE_MANIFEST)" --locked --all-targets -- -D warnings
 
-PROFILE ?= tests/asymmetric.tmreq
+PROFILE ?= Tests/Tuna/Fixtures/asymmetric.tmreq
 test-au: build
 	@test -f "$(PROFILE)" || { echo 'Usage: make test-au PROFILE=/path/to/asymmetric-stereo.tmreq' >&2; exit 1; }
 	mkdir -p build
-	xcrun clang++ -std=c++23 -O3 -arch "$(BUILD_ARCH)" tests/verify.cpp \
-		"target/$(RUST_TARGET)/release/libtuna.a" \
+	xcrun clang++ -std=c++23 -O3 -arch "$(BUILD_ARCH)" -I Sources/Tuna -I $(CORE)/include Tests/Tuna/verify.cpp \
+		"$(CORE)/target/$(RUST_TARGET)/release/libtuna.a" \
 		-framework AudioToolbox -framework CoreFoundation -framework Accelerate -o build/verify
 	build/verify "$(PROFILE)" "$(COMPONENT)/Contents/MacOS/Tuna"
 
 publish:
-	@sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' Cargo.toml > Cargo.toml.tmp
-	@mv Cargo.toml.tmp Cargo.toml
-	@cargo update -p tuna
-	@git add Makefile Cargo.toml Cargo.lock
+	@sed -E 's/^version = "[^"]+"/version = "${VERSION}"/' $(CORE_MANIFEST) > $(CORE_MANIFEST).tmp
+	@mv $(CORE_MANIFEST).tmp $(CORE_MANIFEST)
+	@cargo update --manifest-path "$(CORE_MANIFEST)" -p tuna
+	@git add Makefile $(CORE_MANIFEST) $(CORE)/Cargo.lock
 	@git commit -m "chore: release ${VERSION} 🔥"
 	@git tag "v${VERSION}"
 	@git-cliff -o CHANGELOG.md
